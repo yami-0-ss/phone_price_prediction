@@ -1,19 +1,35 @@
 import os
-import joblib
+import pickle
 import numpy as np
+import pandas as pd
 from flask import Flask, render_template, request, jsonify
 
 app = Flask(__name__)
 
-# Load the trained model
-MODEL_PATH = "AdaBoost_model.pkl"
+# List of all 27 features saved in the model
+FEATURE_NAMES = [
+    "brand", "model", "release_year", "ram_gb", "storage_gb",
+    "screen_size_inches", "battery_capacity", "processor_score", "camera_score",
+    "os_type", "has_5g", "original_price", "purchase_year", "age_months",
+    "usage_hours_per_day", "condition", "battery_health", "screen_cracked",
+    "body_damage", "repair_history", "water_damage", "city_tier",
+    "seller_type", "warranty_remaining_months", "box_available",
+    "charger_available", "market_demand_score"
+]
 
-try:
-    model = joblib.load(MODEL_PATH)
-    print("Model loaded successfully!")
-except Exception as e:
-    model = None
-    print(f"Error loading model: {e}")
+# Check case-sensitive path for Render (Linux environment)
+MODEL_PATH = "Adaboost_model.pkl" if os.path.exists("Adaboost_model.pkl") else "AdaBoost_model.pkl"
+
+model = None
+if os.path.exists(MODEL_PATH):
+    try:
+        with open(MODEL_PATH, "rb") as f:
+            model = pickle.load(f)
+        print(f"Model successfully loaded from {MODEL_PATH}")
+    except Exception as e:
+        print(f"Error unpickling model: {e}")
+else:
+    print(f"Warning: Model file not found at {MODEL_PATH}")
 
 @app.route("/", methods=["GET"])
 def home():
@@ -22,43 +38,26 @@ def home():
 @app.route("/predict", methods=["POST"])
 def predict():
     if model is None:
-        return jsonify({"error": "Model file not found or failed to load."}), 500
+        return jsonify({
+            "status": "error", 
+            "message": "Model file missing or failed to load on the server."
+        }), 500
 
     try:
-        # Extract features from form input
-        # Note: Ensure categorical inputs are encoded as expected by your model
-        data = [
-            float(request.form.get("brand", 0)),
-            float(request.form.get("model", 0)),
-            float(request.form.get("release_year", 2022)),
-            float(request.form.get("ram_gb", 8)),
-            float(request.form.get("storage_gb", 128)),
-            float(request.form.get("screen_size_inches", 6.1)),
-            float(request.form.get("battery_capacity", 4000)),
-            float(request.form.get("processor_score", 80)),
-            float(request.form.get("camera_score", 80)),
-            float(request.form.get("os_type", 0)),
-            float(request.form.get("has_5g", 1)),
-            float(request.form.get("original_price", 500)),
-            float(request.form.get("purchase_year", 2022)),
-            float(request.form.get("age_months", 24)),
-            float(request.form.get("usage_hours_per_day", 5)),
-            float(request.form.get("condition", 1)),
-            float(request.form.get("battery_health", 85)),
-            float(request.form.get("screen_cracked", 0)),
-            float(request.form.get("body_damage", 0)),
-            float(request.form.get("repair_history", 0)),
-            float(request.form.get("water_damage", 0)),
-            float(request.form.get("city_tier", 1)),
-            float(request.form.get("seller_type", 0)),
-            float(request.form.get("warranty_remaining_months", 0)),
-            float(request.form.get("box_available", 1)),
-            float(request.form.get("charger_available", 1)),
-            float(request.form.get("market_demand_score", 70))
-        ]
+        # Construct dictionary with fallback values for any unsubmitted fields
+        input_data = {}
+        for feature in FEATURE_NAMES:
+            val = request.form.get(feature)
+            if val is not None and val.strip() != "":
+                input_data[feature] = float(val)
+            else:
+                input_data[feature] = 0.0
 
-        features = np.array([data])
-        prediction = model.predict(features)[0]
+        # Create DataFrame with expected column order
+        df = pd.DataFrame([input_data])
+        
+        # Predict price/valuation
+        prediction = model.predict(df)[0]
 
         return jsonify({
             "status": "success",
@@ -66,7 +65,11 @@ def predict():
         })
 
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 400
+        print(f"Prediction Error: {str(e)}")
+        return jsonify({
+            "status": "error", 
+            "message": f"Server Prediction Error: {str(e)}"
+        }), 400
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
